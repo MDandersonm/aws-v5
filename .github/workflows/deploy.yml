@@ -35,3 +35,51 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew clean build #clean빌드는 빌드폴더를 통쨰로 날리고 새로 만드는 것.
         shell: bash #이건 디폴트라 제거가능
+
+
+      #CI서버에 만들어진 우분투가 timezone설정이 UTC로 되어있어서 변경
+      # UTC가 기준이기 때문에 한국시간으로 맞추려면 +9시간 해야 한다
+      - name: Get current time
+        uses: 1466587594/get-current-time@v2 #action을 사용
+        id: current-time
+        with:
+          format: YYYY-MM-DDTHH-mm-ss
+          utcOffset: "+09:00"
+      - name: Show Current Time
+        run: echo "CurrentTime=${{steps.current-time.outputs.formattedTime}}" #현재시간 출력
+
+
+
+      # EB(엘라스틱빈스톡)에 CD 하기 위해 추가 작성
+
+      #build.gradle에
+      #jar {
+      #    enabled = false
+      #}
+      #를 꼭해줘야한다.
+
+      #우분투서버에 deploy폴더를 만들고 ci하면서 만들어진 jar파일을 복사해서 deploy/application.jar파일로 넣는다
+      #Procfile도 복붙시키고 .ebextensions폴더도 복붙시킨다.
+      #deploy폴더로 이동해서 해당폴더안의 모든파일을 deploy.zip으로 압축한다.
+      #&& 연산자는 첫 번째 명령의 성공을 확인한 후 두 번째 명령을 실행하므로, 모든 단계가 정확히 수행되었는지를 보장합니다.
+      #마지막으로, .는 현재 디렉토리(여기서는 deploy)를 가리키며, 이 디렉토리의 모든 내용을 deploy.zip 파일로 압축하라는 의미입니다.
+      - name: Generate deployment package
+        run: | # 이것 |를 작성하면 명령어를 여러줄 적을 수 있다. 
+          mkdir deploy 
+          cp build/libs/*.jar deploy/application.jar 
+          cp Procfile deploy/Procfile
+          cp -r .ebextensions deploy/.ebextensions
+          cd deploy && zip -r deploy.zip .
+      #실제 엘라스틱빈스톡으로 deploy를 한다
+      - name: Deploy to EB
+        uses: einaregilsson/beanstalk-deploy@v21 #엘라스틱빈스톡으로 배포하는 라이브러리를 씀
+        #깃헙action이 AWS에 접근가능하도록 IAM aws사용자생성해서 키 2개를 github에 등록
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
+          application_name: aws-v5-beanstalk # 엘리스틱 빈스톡 애플리케이션 이름!
+          environment_name: Aws-v5-beanstalk-env # 엘리스틱 빈스톡 환경 이름!
+          version_label: aws-v5-${{steps.current-time.outputs.formattedTime}} #버전레이블이 매번 바뀌어야하니까.
+          region: ap-northeast-2 #서울
+          deployment_package: deploy/deploy.zip # deploy.zip을 던지겠다는 말(업로드)
+
